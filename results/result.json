@@ -1,0 +1,11 @@
+{
+  "results": [
+    {
+      "image": "annotated_data1.jpg",
+      "result": {
+        "accessible": true,
+        "reason": "A permanent ramp connects the ground level to the entrance, eliminating any steps or curbs at the entrance itself."
+      }
+    }
+  ]
+}
