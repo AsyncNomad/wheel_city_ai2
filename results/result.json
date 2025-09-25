@@ -1,10 +1,38 @@
 {
   "results": [
     {
-      "image": "annotated_data1.jpg",
+      "image": "data1.jpg",
       "result": {
         "accessible": true,
-        "reason": "A permanent ramp connects the ground level to the entrance, eliminating any steps or curbs at the entrance itself."
+        "reason": "There is a ramp connecting the ground to the entrance level, fulfilling the requirement for accessibility when steps or curbs are present."
+      }
+    },
+    {
+      "image": "data2.jpg",
+      "result": {
+        "accessible": false,
+        "reason": "There is a step or curb directly at the entrance, and no ramp is present to provide access for a wheelchair user."
+      }
+    },
+    {
+      "image": "data3.jpg",
+      "result": {
+        "accessible": false,
+        "reason": "There is a step/curb at the entrance and no ramp is present."
+      }
+    },
+    {
+      "image": "data4.jpg",
+      "result": {
+        "accessible": false,
+        "reason": "There is a step/curb at the entrance, and no ramp is present to connect the ground to the entrance."
+      }
+    },
+    {
+      "image": "data5.jpg",
+      "result": {
+        "accessible": true,
+        "reason": "A ramp is present, connecting the ground to the entrance, which makes it accessible despite the presence of a step/curb."
       }
     }
   ]

@@ -1,10 +1,10 @@
 // 이미지 파일을 선택해서 넣으면 YOLOv8, Gemini를 거쳐 json 파일을 자동으로 저장하는 사용자 친화적 프로그램
-// 빠른 속도를 위해 Rust로 만듦.
+// I/O 작업에서의 빠른 속도를 위해 Rust로 만듦.
 use anyhow::{Context, Result};
 use chrono::Local;
 use eframe::{egui, egui::Color32};
-use egui_extras::TableBuilder;
 use eframe::egui::Widget;
+use egui_extras::{TableBuilder, Column};
 use rfd::FileDialog;
 use serde::Deserialize;
 use std::{
@@ -38,17 +38,21 @@ fn main() {
 }
 
 struct AppState {
+    // inputs
     pending_files: Vec<PathBuf>,
+    // logs & results
     log: String,
     last_json_path: Option<PathBuf>,
     results: Vec<WheelOne>,
-    python_bin: String,   // hint or command
-    weights_path: String, // relative to repo root
-    project_root: String, // repo root (auto-detected)
-    // preview
-    preview_paths: Vec<PathBuf>,
+    // config
+    python_bin: String,
+    weights_path: String,
+    project_root: String,
+    // caches
     tex_cache: HashMap<String, egui::TextureHandle>,
     last_run_bbox_dir: Option<PathBuf>,
+    // UI selection
+    selected_image: Option<String>,
 }
 
 impl Default for AppState {
@@ -59,17 +63,19 @@ impl Default for AppState {
             last_json_path: None,
             results: vec![],
             python_bin: "python3".to_string(),
-            weights_path: "yolov8/train_result/ver1/weights/best.pt".to_string(),
+            weights_path: "yolov8/train_result/ver14/weights/best.pt".to_string(),  // 학습한 모델중 가장 성능이 좋은 ver14 사용
             project_root: ".".to_string(),
-            preview_paths: vec![],
             tex_cache: HashMap::new(),
             last_run_bbox_dir: None,
+            selected_image: None,
         }
     }
 }
 
 impl eframe::App for AppState {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        ctx.set_debug_on_hover(false);
+
         // drag & drop
         for dropped in &ctx.input(|i| i.raw.dropped_files.clone()) {
             if let Some(path) = &dropped.path { self.pending_files.push(path.clone()); }
@@ -125,7 +131,7 @@ impl eframe::App for AppState {
                 if let Some(i) = remove_idx { self.pending_files.remove(i); }
                 ui.add_space(8.0);
 
-                if ui.button(egui::RichText::new("▶ Run (Copy → YOLO → Gemini → Show)").color(Color32::WHITE)).clicked() {
+                if ui.button(egui::RichText::new("▶ Run").color(Color32::WHITE)).clicked() {
                     if let Err(e) = self.run_pipeline() {
                         self.append_log(&format!("[ERROR] {}\n", e));
                     }
@@ -136,7 +142,10 @@ impl eframe::App for AppState {
             ui.add_space(12.0);
             ui.separator();
             ui.label(egui::RichText::new("Log").strong());
-            egui::ScrollArea::vertical().max_height(220.0).show(ui, |ui| { ui.monospace(&self.log); });
+            egui::ScrollArea::vertical()
+                .id_source("log_scroll")
+                .max_height(220.0)
+                .show(ui, |ui| { ui.monospace(&self.log); });
 
             ui.add_space(8.0);
             if let Some(p) = &self.last_json_path {
@@ -148,61 +157,113 @@ impl eframe::App for AppState {
         });
 
         egui::CentralPanel::default().show(ctx, |ui| {
+            // ===== Results table =====
             ui.heading("Results preview");
             ui.add_space(6.0);
 
-            TableBuilder::new(ui)
-                .striped(true)
-                .columns(egui_extras::Column::auto().at_least(120.0), 3)
-                .header(20.0, |mut header| {
-                    header.col(|ui| { ui.strong("Image"); });
-                    header.col(|ui| { ui.strong("Accessible"); });
-                    header.col(|ui| { ui.strong("Reason"); });
-                })
-                .body(|mut body| {
-                    for r in &self.results {
-                        body.row(24.0, |mut row| {
-                            row.col(|ui| { ui.label(&r.image); });
-                            row.col(|ui| match r.result.accessible {
-                                Some(true)  => { ui.colored_label(Color32::from_rgb(0,160,0), "true"); }
-                                Some(false) => { ui.colored_label(Color32::from_rgb(200,0,0), "false"); }
-                                None        => { ui.label("null"); }
-                            });
-                            row.col(|ui| { ui.label(&r.result.reason); });
+            let rows = self.results.clone(); // avoid borrow conflicts
+
+            egui::ScrollArea::vertical()
+                .id_source("results_scroll")
+                .auto_shrink([false; 2])
+                .show(ui, |ui| {
+                    TableBuilder::new(ui)
+                        .striped(true)
+                        .column(Column::auto().at_least(78.0))    // BBox thumb
+                        .column(Column::auto().at_least(200.0))   // Image name
+                        .column(Column::auto().at_least(110.0))   // Accessible
+                        .column(Column::remainder())               // Reason (ellipsized)
+                        .header(22.0, |mut header| {
+                            header.col(|ui| { ui.strong("BBox"); });
+                            header.col(|ui| { ui.strong("Image"); });
+                            header.col(|ui| { ui.strong("Accessible"); });
+                            header.col(|ui| { ui.strong("Reason"); });
+                        })
+                        .body(|mut body| {
+                            for r in rows {
+                                let is_selected = self.selected_image.as_deref() == Some(r.image.as_str());
+                                body.row(28.0, |mut row| {
+                                    // thumb
+                                    row.col(|ui| { self.show_bbox_thumb(ui, &r.image, ctx); });
+                                    // filename (click to select)
+                                    row.col(|ui| {
+                                        let resp = ui.selectable_label(is_selected, &r.image);
+                                        if resp.clicked() {
+                                            self.selected_image = Some(r.image.clone());
+                                        }
+                                    });
+                                    // accessible
+                                    row.col(|ui| match r.result.accessible {
+                                        Some(true)  => { ui.colored_label(Color32::from_rgb(0,160,0), "true"); }
+                                        Some(false) => { ui.colored_label(Color32::from_rgb(200,0,0), "false"); }
+                                        None        => { ui.label("null"); }
+                                    });
+                                    // reason (single line, ellipsized to avoid overlap)
+                                    row.col(|ui| {
+                                        ui.add(egui::Label::new(egui::RichText::new(&r.result.reason)).truncate(true).wrap(false));
+                                    });
+                                });
+                            }
                         });
-                    }
                 });
 
             ui.separator();
             ui.add_space(6.0);
-            ui.heading("BBox image preview (latest run)");
-            ui.label("Showing images under the latest run folder in .runner_work/bbox/<timestamp>/.");
-            ui.add_space(6.0);
 
-            egui::ScrollArea::vertical().show(ui, |ui| {
-                for p in &self.preview_paths {
-                    ui.separator();
-                    let name = p.file_name().map(|s| s.to_string_lossy().to_string())
-                        .unwrap_or_else(|| p.display().to_string());
-                    ui.label(egui::RichText::new(name.clone()).strong());
+            // ===== Bottom area: Big bbox preview + full reason =====
+            ui.horizontal(|ui| {
+                ui.vertical(|ui| {
+                    ui.heading("Selected BBox image");
+                    ui.label("Click a filename in the table to select.");
+                    ui.add_space(6.0);
+                    egui::ScrollArea::both()
+                        .id_source("big_preview_scroll")
+                        .show(ui, |ui| {
+                            if let Some(p) = self.find_bbox_image_for_selected() {
+                                let key = format!("big:{}", p.display());
+                                if !self.tex_cache.contains_key(&key) {
+                                    if let Some(tex) = load_texture_from_path(ctx, &p) {
+                                        self.tex_cache.insert(key.clone(), tex);
+                                    }
+                                }
+                                if let Some(tex) = self.tex_cache.get(&key) {
+                                    let size = tex.size_vec2();
+                                    let max_w = ui.available_width().min(1400.0);
+                                    let scale = (max_w / size.x).min(1.0);
+                                    let sized = egui::load::SizedTexture::from_handle(tex);
+                                    egui::Image::new(sized)
+                                        .max_width(size.x * scale)
+                                        .max_height(size.y * scale)
+                                        .ui(ui);
+                                } else {
+                                    ui.label("Failed to load selected image.");
+                                }
+                            } else {
+                                ui.label("Select a row above to preview its bbox image here.");
+                            }
+                        });
+                });
 
-                    if !self.tex_cache.contains_key(&name) {
-                        if let Some(tex) = load_texture_from_path(ctx, p) {
-                            self.tex_cache.insert(name.clone(), tex);
-                        }
-                    }
+                ui.separator();
 
-                    if let Some(tex) = self.tex_cache.get(&name) {
-                        let size = tex.size_vec2();
-                        let max_w = ui.available_width().min(900.0);
-                        let scale = (max_w / size.x).min(1.0);
-                        let sized = egui::load::SizedTexture::from_handle(tex);
-                        egui::Image::new(sized).max_width(size.x * scale).max_height(size.y * scale).ui(ui);
-                    } else {
-                        ui.label("Failed to load image.");
-                    }
-                    ui.add_space(8.0);
-                }
+                ui.vertical(|ui| {
+                    ui.heading("Full reason");
+                    ui.add_space(6.0);
+                    egui::ScrollArea::vertical()
+                        .id_source("reason_full_scroll")
+                        .show(ui, |ui| {
+                            if let Some(sel) = self.selected_image.as_ref() {
+                                if let Some(item) = self.results.iter().find(|w| &w.image == sel) {
+                                    // wrapped, full text
+                                    ui.label(egui::RichText::new(&item.result.reason));
+                                } else {
+                                    ui.label("No reason available.");
+                                }
+                            } else {
+                                ui.label("Select a row to view the full reason.");
+                            }
+                        });
+                });
             });
         });
     }
@@ -211,9 +272,7 @@ impl eframe::App for AppState {
 impl AppState {
     fn append_log(&mut self, s: &str) {
         self.log.push_str(s);
-        if self.log.len() > 120_000 {
-            self.log = self.log[self.log.len() - 60_000..].to_string();
-        }
+        if self.log.len() > 120_000 { self.log = self.log[self.log.len() - 60_000..].to_string(); }
     }
 
     fn run_pipeline(&mut self) -> Result<()> {
@@ -222,25 +281,21 @@ impl AppState {
             self.append_log(&format!("[INFO] project root auto-detected: {}\n", project_root.display()));
         }
 
-        // resolve Python
         let python = self.resolve_python(&project_root)?;
         self.append_log(&format!("[INFO] using Python: {}\n", python));
 
-        // scripts & weights
         let yolo_script   = project_root.join("yolov8").join("run.py");
         let gemini_script = project_root.join("gemini").join("run.py");
-        if !yolo_script.exists() { anyhow::bail!("Missing script: {}", yolo_script.display()); }
-        if !gemini_script.exists() { anyhow::bail!("Missing script: {}", gemini_script.display()); }
+        if !yolo_script.exists()  { anyhow::bail!("Missing script: {}", yolo_script.display()); }
+        if !gemini_script.exists(){ anyhow::bail!("Missing script: {}", gemini_script.display()); }
         let weights_abs = project_root.join(&self.weights_path);
-        if !weights_abs.exists() { anyhow::bail!("Weights file not found: {}", weights_abs.display()); }
+        if !weights_abs.exists()  { anyhow::bail!("Weights file not found: {}", weights_abs.display()); }
 
-        // user-visible folders (never touch!)
+        // user-visible
         let user_input_dir = project_root.join("input_images");
-        let user_bbox_dir  = project_root.join("bbox_images");
-        fs::create_dir_all(&user_input_dir).ok(); // create if not exists
-        fs::create_dir_all(&user_bbox_dir).ok();  // create if not exists
+        fs::create_dir_all(&user_input_dir).ok();
 
-        // run-scoped work dirs
+        // run-scoped
         let work_dir   = project_root.join(".runner_work");
         let run_input  = work_dir.join("input");
         let ts         = Local::now().format("%Y%m%d_%H%M%S").to_string();
@@ -250,14 +305,14 @@ impl AppState {
         fs::create_dir_all(&run_bbox).ok();
         fs::create_dir_all(&results_dir).ok();
 
-        // clear run_input only (safe, it's our work dir)
+        // clear run_input only
         for e in fs::read_dir(&run_input)? {
             let p = e?.path();
             if p.is_file() { let _ = fs::remove_file(p); }
         }
 
-        // files to use: if none selected, default to all files under user_input_dir
-        let mut sources: Vec<PathBuf> = if self.pending_files.is_empty() {
+        // sources
+        let sources: Vec<PathBuf> = if self.pending_files.is_empty() {
             let mut v = vec![];
             if let Ok(rd) = fs::read_dir(&user_input_dir) {
                 for e in rd.flatten() {
@@ -294,7 +349,7 @@ impl AppState {
             }
         }
 
-        // YOLO inference → run_bbox
+        // YOLO → run_bbox
         self.append_log("[STEP] running YOLO inference...\n");
         let mut cmd = Command::new(&python);
         cmd.arg(&yolo_script)
@@ -303,7 +358,7 @@ impl AppState {
            .arg("--outdir").arg(&run_bbox);
         self.exec_and_log_in_dir(cmd, "[YOLO] ", &project_root)?;
 
-        // Gemini judgment (read run_bbox)
+        // Gemini
         self.append_log("[STEP] running Gemini judgment...\n");
         let out_json = results_dir.join(format!("result_{}.json", ts));
         let mut cmd2 = Command::new(&python);
@@ -312,7 +367,7 @@ impl AppState {
             .arg("--out_json").arg(&out_json);
         self.exec_and_log_in_dir(cmd2, "[GEMINI] ", &project_root)?;
 
-        // Load & show results
+        // load results
         self.append_log("[STEP] loading results...\n");
         let data = fs::read_to_string(&out_json).with_context(|| "failed to read result json")?;
         let parsed: WheelResultFile = serde_json::from_str(&data).with_context(|| "failed to parse result json")?;
@@ -320,21 +375,15 @@ impl AppState {
         self.last_json_path = Some(out_json.clone());
         self.last_run_bbox_dir = Some(run_bbox.clone());
 
-        // preview latest run images only
-        self.preview_paths.clear();
-        self.tex_cache.clear();
-        let mut imgs: Vec<PathBuf> = vec![];
-        if let Ok(rd) = fs::read_dir(&run_bbox) {
-            for e in rd.flatten() {
-                let p = e.path();
-                if let Some(ext) = p.extension() {
-                    let e = ext.to_string_lossy().to_lowercase();
-                    if ["jpg","jpeg","png","webp","bmp"].contains(&e.as_str()) { imgs.push(p); }
-                }
+        // auto-select first item
+        if self.selected_image.is_none() {
+            if let Some(first) = self.results.first() {
+                self.selected_image = Some(first.image.clone());
             }
         }
-        imgs.sort();
-        self.preview_paths = imgs;
+
+        // clear caches for new run
+        self.tex_cache.clear();
 
         self.append_log("[DONE] Completed.\n");
         Ok(())
@@ -359,9 +408,7 @@ impl AppState {
         candidates.push("python".to_string());
 
         for cand in candidates {
-            if Command::new(&cand).arg("--version").output().is_ok() {
-                return Ok(cand);
-            }
+            if Command::new(&cand).arg("--version").output().is_ok() { return Ok(cand); }
         }
         Err(anyhow::anyhow!(
             "No working Python found. Create venv at {}/.venv or set an explicit path.",
@@ -382,6 +429,56 @@ impl AppState {
             }
         }
         Err(anyhow::anyhow!("Could not locate project root containing yolov8/run.py and gemini/run.py"))
+    }
+
+    // small thumb in table
+    fn show_bbox_thumb(&mut self, ui: &mut egui::Ui, filename: &str, ctx: &egui::Context) {
+        if let Some(p) = self.find_bbox_image_path(filename) {
+            let key = format!("thumb:{}", p.display());
+            if !self.tex_cache.contains_key(&key) {
+                if let Some(tex) = load_texture_from_path(ctx, &p) {
+                    self.tex_cache.insert(key.clone(), tex);
+                }
+            }
+            if let Some(tex) = self.tex_cache.get(&key) {
+                let sized = egui::load::SizedTexture::from_handle(tex);
+                egui::Image::new(sized).max_width(72.0).max_height(54.0).ui(ui);
+                return;
+            }
+        }
+        ui.label("—");
+    }
+
+    // resolve selected image full path (robust to extension mismatches)
+    fn find_bbox_image_for_selected(&self) -> Option<PathBuf> {
+        if let Some(sel) = self.selected_image.as_ref() {
+            self.find_bbox_image_path(sel)
+        } else { None }
+    }
+
+    fn find_bbox_image_path(&self, filename: &str) -> Option<PathBuf> {
+        let dir = self.last_run_bbox_dir.as_ref()?;
+        let direct = dir.join(filename);
+        if direct.exists() { return Some(direct); }
+        // fallback: search by stem across extensions
+        let stem = Path::new(filename).file_stem()?.to_string_lossy().to_string();
+        let exts = ["jpg","jpeg","png","webp","bmp"];
+        for e in &exts {
+            let cand = dir.join(format!("{}.{}", stem, e));
+            if cand.exists() { return Some(cand); }
+        }
+        // as a last resort, scan all files in dir and match stem
+        if let Ok(rd) = fs::read_dir(dir) {
+            for ent in rd.flatten() {
+                let p = ent.path();
+                if p.is_file() {
+                    if let Some(s) = p.file_stem().map(|s| s.to_string_lossy().to_string()) {
+                        if s == stem { return Some(p); }
+                    }
+                }
+            }
+        }
+        None
     }
 }
 

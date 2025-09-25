@@ -1,4 +1,4 @@
-# 개선된 휠체어 접근성 분석 AI - Wheel City AI 2
+# 건물 입구 휠체어 접근성 분석 AI - Wheel City AI 2
 
 `Wheel City AI 2`는 건물 입구 이미지 한 장으로 휠체어 접근성을 자동으로 분석하고 판단하는 딥러닝 기반 프로젝트입니다. **YOLOv8**의 객체 탐지 기술과 **Gemini**의 상황 인지 능력을 결합하여, 사진 속 장소에 대해 이동 약자의 통행 가능 여부를 판단합니다.
 
@@ -31,6 +31,8 @@
 ```bash
 wheel_city_ai/
 ├── yolov8/                   # YOLOv8 모델을 위한 프로젝트 폴더
+│   ├── prepare_dataset.py    # 모델 학습에 필요한 이미지, xml 데이터를 input 형식에 맞게 변환
+│   ├── train.py              # YOLOv8을 학습시키기 위한 스크립트
 │   ├── run.py                # step 2. YOLOv8 분석을 실행하는 스크립트
 │   └── ...                   # (학습 데이터, 모델 가중치 등)
 │
@@ -49,7 +51,25 @@ wheel_city_ai/
 ---
 
 ## 사용 방법
+YOLOv8은 YOLOv8m 모델로 학습해놓은 샘플 ver14가 yolov8/train_result/에 있습니다. 학습을 통해 커스텀할 것이 아니라면 그대로 사용해도 됩니다.
+### 1. Runner를 이용하는 손쉬운 사용 방법
+이미지를 드래그하거나 불러온 뒤 Run 버튼을 누르면 결과를 보여주는 runner 프로그램을 사용할 수 있습니다.
+아래 명령어를 입력하여 runner를 실행합니다.
 
+```bash
+cd runner
+cargo run
+```
+
+1. **이미지 입력:**
+- 이미지를 드래그하거나 선택합니다. 여러 장의 이미지도 가능합니다.
+ <img src="https://github.com/user-attachments/assets/94a09910-e3fe-400d-920d-9aa64dbc88ec" width="1000" height="600"/>
+
+2. **Run 버튼을 눌러 실행, 결과 확인**
+- 최종 분석 결과는 `results/` 폴더 안의 `result.json` 파일에서 확인할 수 있습니다.
+ <img src="https://github.com/user-attachments/assets/01d84243-ae6e-4086-84da-abdd9fe8c934" width="1000" height="500"/>
+
+### 2. 스크립트 실행으로 사용하는 방법
 1. **이미지 입력:**
     - `test_images/` 폴더에 분석하고 싶은 건물 입구 이미지를 넣습니다.
 2. **YOLOv8 실행 (객체 탐지):**
@@ -64,15 +84,26 @@ wheel_city_ai/
 
 ## 실행 예시
 
-1. input 이미지 준비
+1. **이미지 입력**
 
  <img src="https://github.com/user-attachments/assets/58d210dc-d75a-4fa5-b0d0-7a3e4660ed41" width="400" height="600"/>
 
-2. YOLOv8s가 턱과 경사로를 감지하여 핀
+2. **YOLOv8s가 output 생성, gemini에 텍스트 프롬프트와 함께 입력**
 
- <img src="https://github.com/user-attachments/assets/f514953d-f931-42ca-84d9-ed8f292fa24a" width="400" height="600"/>
+ <img src="https://github.com/user-attachments/assets/7922035e-7c24-4dc0-8d1d-39ef42a27135" width="400" height="600"/>
 
-3. Gemini가 상황을 판단하여 최종 의사결정, 스크립트를 통해 JSON으로 파싱
+```python
+SYSTEM_PROMPT = (
+    "You are an accessibility analysis AI. Analyze the provided image of a building entrance to determine if it is accessible for a lone wheelchair user.\n"
+    "Accessibility Rules:\n"
+    "1. There must be no steps or curbs between the ground and the entrance.\n"
+    "2. If there are steps or curbs, a ramp must connect the ground to the entrance.\n\n"
+    "Return ONLY valid JSON. Do not include any explanations, Markdown, or code fences.\n"
+    'JSON schema: {"accessible": boolean | null, "reason": string}\n'
+)
+```
+
+3. **Gemini가 상황을 종합적으로 판단하여 최종 의사결정, 스크립트를 통해 JSON으로 파싱**
 
 ```json
 {
@@ -91,7 +122,7 @@ wheel_city_ai/
 ---
 
 ## 🛠️ 환경 설정 (Ubuntu 24.04 기준)
-실행 전 .env 반드시 수정하기. 본인의 API KEY를 설정하고, YOLOv8 모델 학습 설정 커스텀할 수 있음.
+실행 전 .env 반드시 수정하기. 본인의 API KEY 설정 필수.
 ```bash
 # Google Gemini
 GOOGLE_API_KEY="여기 자신의 API KEY 넣기"
