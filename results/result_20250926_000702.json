@@ -1,0 +1,39 @@
+{
+  "results": [
+    {
+      "image": "data1.jpg",
+      "result": {
+        "accessible": true,
+        "reason": "There is a curb or step leading to the entrance, but a ramp is provided to connect the ground to the entrance, making it accessible for a wheelchair user."
+      }
+    },
+    {
+      "image": "data2.jpg",
+      "result": {
+        "accessible": false,
+        "reason": "There is a significant step/curb at the entrance, and no ramp is present to provide access for a wheelchair user."
+      }
+    },
+    {
+      "image": "data3.jpg",
+      "result": {
+        "accessible": false,
+        "reason": "There is a significant step/curb at the entrance, and no ramp is present to provide access for a wheelchair user."
+      }
+    },
+    {
+      "image": "data4.jpg",
+      "result": {
+        "accessible": false,
+        "reason": "There is a step/curb at the entrance, and no ramp is provided to connect the ground to the entrance, making it inaccessible for a lone wheelchair user."
+      }
+    },
+    {
+      "image": "data5.jpg",
+      "result": {
+        "accessible": true,
+        "reason": "Although there appears to be a raised threshold or step at the entrance, a portable metal ramp is clearly present and connects the ground level to the entrance, fulfilling the requirement for accessibility."
+      }
+    }
+  ]
+}

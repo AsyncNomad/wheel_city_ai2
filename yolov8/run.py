@@ -6,7 +6,7 @@ from ultralytics import YOLO
 
 def main():
     ap = argparse.ArgumentParser()
-    ap.add_argument("--weights", default="yolov8/train_result/ver1/weights/best.pt")
+    ap.add_argument("--weights", default="yolov8/train_result/ver14/weights/best.pt")   # 학습한 모델중 가장 성능이 좋은 ver14 사용
     ap.add_argument("--source",  default="input_images")
     ap.add_argument("--outdir",  default="bbox_images")
     ap.add_argument("--imgsz",   type=int, default=640)
