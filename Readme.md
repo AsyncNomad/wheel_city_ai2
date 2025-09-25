@@ -88,7 +88,7 @@ cargo run
 
  <img src="https://github.com/user-attachments/assets/58d210dc-d75a-4fa5-b0d0-7a3e4660ed41" width="400" height="600"/>
 
-2. **YOLOv8s가 output 생성, gemini에 텍스트 프롬프트와 함께 입력**
+2. **YOLOv8m이 output 생성, gemini에 텍스트 프롬프트와 함께 입력**
 
  <img src="https://github.com/user-attachments/assets/7922035e-7c24-4dc0-8d1d-39ef42a27135" width="400" height="600"/>
 
